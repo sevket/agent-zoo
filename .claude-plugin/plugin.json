@@ -1,6 +1,6 @@
 {
   "name": "agent-zoo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A zoo of subagents: every subagent that is born shows up in the pane with its avatar, what it is doing (last tool) is visible live, when its work is done it falls asleep and vanishes with a 'poof'. /zoo opens/closes the pane.",
   "author": {
     "name": "sevket"

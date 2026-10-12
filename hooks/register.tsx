@@ -9,7 +9,7 @@ import type { Register, EngineInterface } from 'claude-code'
 // Clicking a command chip in the bottom row shows its help text and a "▶ run" button.
 //
 // Is the pane open: not a flag but `$.ui.panes()` (the flag went stale when the person closed it with X). If the person
-// closed it, it is not reopened until this party ends (the zoo empties); a new party reopens it (autoOpen).
+// closed it, it is not reopened while that party is still working; the next party (a birth while nobody works) reopens it (autoOpen).
 // /zoo opens/refreshes, /zoo close closes, /zoo text gives plain text. No external access at all.
 
 type Opts = { autoOpen?: boolean; sleepSeconds?: number }
@@ -58,7 +58,7 @@ const WILD = ['🦊', '🐙', '🦉', '🐢', '🐝', '🦀', '🐧', '🦋', '�
 // Each agent takes the next color in turn (theme keys + named colors; all of them render on every surface).
 const PALETTE = ['cyan', 'magenta', 'success', 'warning', 'claude', 'merged', 'suggestion', 'permission']
 const CHIPS: Array<{ key: string; label: string; help: string; run?: { command: string; args: string } }> = [
-  { key: 'chip-close', label: '/zoo close', help: 'Closes the pane. Once this party is over and a new agent is born it reopens by itself (if autoOpen is on).', run: { command: COMMAND, args: 'close' } },
+  { key: 'chip-close', label: '/zoo close', help: 'Closes the pane. Once nobody is working and a new agent is born it reopens by itself (if autoOpen is on).', run: { command: COMMAND, args: 'close' } },
   { key: 'chip-text', label: '/zoo text', help: 'Writes the same info into the chat as plain text; for the CLI and surfaces where the pane cannot be placed.', run: { command: COMMAND, args: 'text' } },
   { key: 'chip-cfg', label: '⚙ settings', help: '/plugin → agent-zoo → configure: autoOpen (open on first birth), sleepSeconds (sleep duration, default 20).' },
 ]
@@ -102,7 +102,8 @@ function labelOf(e: Record<string, unknown>): string {
 function sleepMs() { return Math.max(1, opts.sleepSeconds ?? 20) * 1000 }
 
 async function isUp($: EngineInterface): Promise<boolean> {
-  try { return (await $.ui.panes()).some(p => p.id === PANE) } catch { return isPaneOpen }
+  // A pane the engine still lists but no longer shows (closed on the surface) counts as down.
+  try { return (await $.ui.panes()).some(p => p.id === PANE && p.isShown !== false) } catch { return isPaneOpen }
 }
 async function openPane($: EngineInterface): Promise<boolean> {
   const opened = await $.ui.open({ id: PANE, title: 'Agent Zoo' }).catch(() => null)
@@ -175,6 +176,9 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const r = await next(e)
     if (r.deny === undefined && r.agentId) {
+      // A new party starts when nobody is working any more (sleeping critters do not count): a person who closed
+      // the pane during the last party gets it back for the next one.
+      if (!zoo.some(c => c.phase === 'working')) closedByPerson = false
       zoo.push({
         id: r.agentId,
         type: e.subagentType,

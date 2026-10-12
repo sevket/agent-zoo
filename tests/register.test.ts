@@ -115,3 +115,17 @@ test('a permission request for a subagent tool call shows it as waiting; the sta
   expect(r.text).not.toContain('waiting')
   expect(r.text).toContain('1 working · 0 sleeping')
 })
+
+test('a person who closed the pane gets it back at the next party: a birth while nobody works reopens it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(session)
+  const a = await spawn($, 'Explore', 'one')
+  expect(w.opened.filter(id => id === 'agent-zoo').length).toBe(1)
+  await $.command.run(run('close'))
+  const b = await spawn($, 'Plan', 'two') // same party: one is still working
+  expect(w.opened.filter(id => id === 'agent-zoo').length).toBe(1)
+  await $.turn.complete(done(a.agentId!))
+  await $.turn.complete(done(b.agentId!))
+  await spawn($, 'Explore', 'three') // nobody works any more: a new party, the pane comes back
+  expect(w.opened.filter(id => id === 'agent-zoo').length).toBe(2)
+})
