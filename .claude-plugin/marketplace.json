@@ -1,0 +1,6 @@
+{
+  "name": "agent-zoo",
+  "owner": { "name": "sevket" },
+  "metadata": { "description": "A live pane of your Claude Code subagents: who was born, what they are doing, who is waiting for permission, who is asleep." },
+  "plugins": [{ "name": "agent-zoo", "source": "./", "description": "Subagent zoo pane (/zoo): every spawned subagent gets an avatar and a colored card with its model, tool count, last tool calls, permission waits and token usage; it sleeps when done, then goes poof." }]
+}

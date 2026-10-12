@@ -1,0 +1,23 @@
+{
+  "name": "agent-zoo",
+  "version": "1.0.0",
+  "description": "A zoo of subagents: every subagent that is born shows up in the pane with its avatar, what it is doing (last tool) is visible live, when its work is done it falls asleep and vanishes with a 'poof'. /zoo opens/closes the pane.",
+  "author": {
+    "name": "sevket"
+  },
+  "license": "MIT",
+  "userConfig": {
+    "autoOpen": {
+      "type": "boolean",
+      "description": "Open the pane by itself when the first subagent is born",
+      "default": true,
+      "title": "Auto open"
+    },
+    "sleepSeconds": {
+      "type": "number",
+      "description": "How many seconds a finished agent sleeps before it vanishes",
+      "default": 20,
+      "title": "Sleep duration (s)"
+    }
+  }
+}
