@@ -4,6 +4,12 @@ A live pane for your Claude Code subagents. Every subagent that is born shows up
 
 No configuration, no prompt changes: the pane opens by itself the first time a subagent is spawned.
 
+<p align="center">
+  <img src="docs/zoo-working.png" alt="six subagents of different types working, one already gone poof" width="300">
+  <img src="docs/zoo-waiting.png" alt="three subagents waiting for permission" width="300">
+  <img src="docs/zoo-sleeping.png" alt="finished subagents sleeping with their token usage" width="300">
+</p>
+
 ## Install
 
 Type this at the prompt of a terminal `claude` session (Claude Code ≥ 2.1.287):
