@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# zoo-run — show a process that is not a Claude subagent (an `agy` run, a build, a script) in the agent-zoo pane.
+#
+#   zoo-run --name <name> [--kind agy] [--model <m>] [--task "<summary>"] [--log <file>] [--id <id>]
+#           [--count <regex>] [--interval <s>] [--avatar <emoji>] -- <command...>
+#
+# It keeps a record at  $ZOO_DIR/<id>.json  (default ~/.claude/agent-zoo/external/<id>.json), which the agent-zoo mod
+# polls:  running while the command runs, refreshed every --interval seconds (default 10) with the newest meaningful
+# line of --log as "last" (that refresh is also the heartbeat: a record that stops refreshing is dropped by the mod after
+# staleMinutes); done / failed (+ exitCode, endedAt) when the command ends. The command's own stdout/stderr/stdin and
+# exit code pass through untouched. Records older than 7 days are cleaned up on start.
+#
+#   --name      card title (default: the id)
+#   --kind      what it is; picks the avatar (agy → 🛸; anything else gets a stable animal). Default: external
+#   --model     shown in the card
+#   --task      short summary, shown under "details"
+#   --log       file whose last non-empty line (ANSI stripped, lines starting with "==" skipped) becomes "last"
+#   --count     extended regex; the number of --log lines matching it is reported as "tools"
+#   --id        record id / file name (default: --name, made file-safe). Re-running with the same id replaces the record
+#   --interval  seconds between refreshes (default 10)
+#   --avatar    one or two emoji overriding the kind's avatar
+set -u
+
+name=""; kind="external"; model=""; task=""; log=""; id=""; count=""; interval=10; avatar=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name) name=${2-}; shift 2 ;;
+    --kind) kind=${2-}; shift 2 ;;
+    --model) model=${2-}; shift 2 ;;
+    --task) task=${2-}; shift 2 ;;
+    --log) log=${2-}; shift 2 ;;
+    --id) id=${2-}; shift 2 ;;
+    --count) count=${2-}; shift 2 ;;
+    --interval) interval=${2-}; shift 2 ;;
+    --avatar) avatar=${2-}; shift 2 ;;
+    --) shift; break ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) break ;;
+  esac
+done
+if [ $# -eq 0 ]; then
+  echo "zoo-run: no command given (usage: zoo-run --name <name> [--kind agy] ... -- <command...>)" >&2
+  exit 2
+fi
+case "$interval" in ''|*[!0-9]*) interval=10 ;; esac
+[ "$interval" -lt 1 ] && interval=1
+[ -z "$id" ] && id=${name:-run-$$}
+id=${id//[^A-Za-z0-9._-]/-}
+[ -z "$name" ] && name=$id
+task=${task:0:300}
+
+dir=${ZOO_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agent-zoo/external}
+mkdir -p "$dir" 2>/dev/null || { echo "zoo-run: cannot create $dir (the command runs without a record)" >&2; dir=""; }
+[ -n "$dir" ] && find "$dir" -maxdepth 1 -name '*.json' -mtime +7 -delete 2>/dev/null
+
+# Everything below avoids forks where it can (a fork costs 50-100 ms under Git Bash), so a refresh stays cheap.
+set_now() { # NOW = epoch milliseconds
+  if [ -n "${EPOCHREALTIME-}" ]; then
+    local t=${EPOCHREALTIME/[.,]/}; NOW=${t%???}
+  elif printf -v NOW '%(%s)T' -1 2>/dev/null; then
+    NOW=$((NOW * 1000))
+  else
+    NOW=$(( $(date +%s) * 1000 ))
+  fi
+}
+CTRL=$'\001\002\003\004\005\006\007\010\013\014\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037'
+jstr() { # J = the JSON string literal for $1: escape backslash, quote, newline, tab; drop other control characters
+  local s=$1
+  s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\t'/\\t}
+  s=${s//[$CTRL]/}
+  J="\"$s\""
+}
+last_line() { # LAST = newest meaningful line of the log (ANSI stripped, blank and "==" marker lines skipped)
+  LAST=""
+  [ -n "$log" ] && [ -f "$log" ] || return 0
+  LAST=$(tail -c 8192 "$log" 2>/dev/null | awk '{ gsub(/\r/, ""); gsub(/\033\[[0-9;]*[A-Za-z]/, ""); if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^==/) next; l = $0 } END { print substr(l, 1, 200) }')
+}
+
+set_now; started=$NOW
+write_state() { # write_state <running|done|failed> [exitCode]
+  [ -n "$dir" ] || return 0
+  local state=$1 code=${2-} tools="" extra="" tmp jid jname jkind jmodel jtask jlog jlast
+  set_now
+  last_line
+  [ -n "$count" ] && [ -f "$log" ] && tools=$(grep -cE -- "$count" "$log" 2>/dev/null)
+  [ "$state" != running ] && extra=",\"endedAt\":$NOW"
+  [ -n "$code" ] && extra="$extra,\"exitCode\":$code"
+  [ -n "$tools" ] && extra="$extra,\"tools\":$tools"
+  if [ -n "$avatar" ]; then jstr "$avatar"; extra="$extra,\"avatar\":$J"; fi
+  jstr "$id"; jid=$J; jstr "$name"; jname=$J; jstr "$kind"; jkind=$J; jstr "$model"; jmodel=$J
+  jstr "$task"; jtask=$J; jstr "$log"; jlog=$J; jstr "$LAST"; jlast=$J
+  tmp="$dir/.$id.$$.tmp"
+  printf '{"id":%s,"name":%s,"kind":%s,"model":%s,"task":%s,"log":%s,"startedAt":%s,"updatedAt":%s,"state":"%s","last":%s,"pid":%s%s}\n' \
+    "$jid" "$jname" "$jkind" "$jmodel" "$jtask" "$jlog" "$started" "$NOW" "$state" "$jlast" "$$" "$extra" > "$tmp" 2>/dev/null
+  # atomic replace; a reader holding the old file open (Windows) can make the first try fail
+  mv -f "$tmp" "$dir/$id.json" 2>/dev/null || { sleep 0.2; mv -f "$tmp" "$dir/$id.json" 2>/dev/null || rm -f "$tmp"; }
+}
+
+write_state running
+"$@" <&0 &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
+while kill -0 "$child" 2>/dev/null; do
+  for ((i = 0; i < interval * 2; i++)); do
+    kill -0 "$child" 2>/dev/null || break
+    sleep 0.5
+  done
+  kill -0 "$child" 2>/dev/null && write_state running
+done
+wait "$child"; code=$?
+trap - TERM INT HUP
+if [ "$code" -eq 0 ]; then write_state done 0; else write_state failed "$code"; fi
+exit "$code"

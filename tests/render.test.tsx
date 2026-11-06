@@ -63,3 +63,40 @@ test('zoo with an agent: frame, details button, chip help and token line render'
   expect(await ui.find({ type: 'Text', text: /sleeping/ })).toBeDefined()
   await ui.unmount()
 })
+
+// External runs: records in the external folder draw as cards on every surface.
+function externalWorld(on: On, records: Record<string, unknown>) {
+  world(on)
+  mock.env(on, { HOME: '/h' })
+  const files = Object.entries(records).map(([name, body], i) => ({ name, text: JSON.stringify(body), mtimeMs: 1000 + i }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.list', () => ({ value: files.map(f => ({ name: f.name, kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false })) }))
+  on('fs.read', (_$, e) => ({ value: files.find(f => e.path.replace(/\\/g, '/').endsWith('/' + f.name))!.text }))
+}
+
+test('external runs render as cards: kind avatar, last line, details with task and log, failed mark', async ($, on) => {
+  const now = Date.now()
+  externalWorld(on, {
+    'run.json': { id: 'run', name: 'surface-ai', kind: 'agy', model: 'gemini-4-argon-high', task: 'Wire the surface AI page', startedAt: now - 5000, updatedAt: now, state: 'running', last: 'pnpm lint running', log: '/logs/surface-ai-agy.log' },
+    'bad.json': { id: 'bad', name: 'db-connector', kind: 'agy', model: 'gemini', task: 'Connect the db', startedAt: now - 9000, updatedAt: now, endedAt: now, state: 'failed', exitCode: 2, last: 'exit 2' },
+  })
+  await $.session.start(session)
+  await $.command.run({ command: 'zoo', args: 'text', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const ui = await $.ui.mount({ plugin: 'agent-zoo', surface, ...PANE })
+    expect(await ui.find({ type: 'Text', text: /surface-ai/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /🛸/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /pnpm lint running/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /external run/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /failed ✗ \(exit 2\)/ })).toBeDefined()
+    await ui.press({ key: 'exp-ext:run@' + (now - 5000) })
+    expect(await ui.find({ type: 'Text', text: /Wire the surface AI page/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /surface-ai-agy\.log/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /recent activity/ })).toBeDefined()
+    await ui.press({ key: 'exp-ext:run@' + (now - 5000) })
+    await ui.press({ key: 'chip-ext' })
+    expect(await ui.find({ type: 'Text', text: /zoo-run/ })).toBeDefined()
+    await ui.press({ key: 'chip-ext' })
+    await ui.unmount()
+  }
+})

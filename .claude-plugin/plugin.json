@@ -1,7 +1,7 @@
 {
   "name": "agent-zoo",
-  "version": "1.0.1",
-  "description": "A zoo of subagents: every subagent that is born shows up in the pane with its avatar, what it is doing (last tool) is visible live, when its work is done it falls asleep and vanishes with a 'poof'. /zoo opens/closes the pane.",
+  "version": "1.1.0",
+  "description": "A zoo of subagents: every subagent that is born shows up in the pane with its avatar, what it is doing (last tool) is visible live, when its work is done it falls asleep and vanishes with a 'poof'. External runs (agy, scripts) show up too when started through bin/zoo-run. /zoo opens/closes the pane.",
   "author": {
     "name": "sevket"
   },
@@ -9,7 +9,7 @@
   "userConfig": {
     "autoOpen": {
       "type": "boolean",
-      "description": "Open the pane by itself when the first subagent is born",
+      "description": "Open the pane by itself when the first subagent (or external run) is born",
       "default": true,
       "title": "Auto open"
     },
@@ -18,6 +18,18 @@
       "description": "How many seconds a finished agent sleeps before it vanishes",
       "default": 20,
       "title": "Sleep duration (s)"
+    },
+    "staleMinutes": {
+      "type": "number",
+      "description": "A working critter that has had no event for this many minutes is dropped as lost (its end was never reported). 0 turns the rule off.",
+      "default": 120,
+      "title": "Lost after (min)"
+    },
+    "externalDir": {
+      "type": "string",
+      "description": "Folder with the JSON records of external runs. Empty: <claude config dir>/agent-zoo/external (~/.claude/agent-zoo/external).",
+      "default": "",
+      "title": "External runs folder"
     }
   }
 }
