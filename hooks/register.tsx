@@ -101,6 +101,8 @@ const CHIPS: Array<{ key: string; label: string; help: string; run?: { command: 
 
 let opts: Opts = {}
 const zoo: Critter[] = []
+/** Critters that already went poof, by agent id: a subagent that resumes after that comes back as itself, not reborn. */
+const retired = new Map<string, Critter>()
 let born = 0
 let lost = 0
 let paletteAt = 0
@@ -335,6 +337,29 @@ async function openPane($: EngineInterface): Promise<boolean> {
   return isPaneOpen
 }
 
+// A subagent that stops to wait for its own background work and resumes later reports again under the same
+// agentId (another agent.spawn, or tool calls after its turn.complete). That is the same critter waking up, not a
+// birth: it goes back to working (out of `retired` if it already went poof), nothing is pushed and `born` does not move.
+function wake($: EngineInterface, id: string): Critter | undefined {
+  let c = zoo.find(x => x.id === id)
+  if (!c) {
+    const r = retired.get(id)
+    if (!r) return undefined
+    retired.delete(id)
+    c = r
+    zoo.push(c)
+  }
+  if (c.phase !== 'working') {
+    c.phase = 'working'
+    delete c.sleptAt
+    delete c.durationMs
+  }
+  c.lastEventAt = Date.now()
+  startTicker($)
+  $.ui.invalidate('ui.render')
+  return c
+}
+
 // Animation and timer: every 350 ms while the zoo is populated (even with the pane closed, so sleep→vanish keeps flowing).
 function tick($: EngineInterface) {
   frame = (frame + 1) % 1_000_000
@@ -346,11 +371,13 @@ function tick($: EngineInterface) {
     else if (c.phase === 'vanishing' && c.sleptAt !== undefined && now - c.sleptAt >= sleepMs() + VANISH_MS) {
       zoo.splice(i, 1)
       if (c.ext) extRetired.add(c.ext.key) // its record stays in the folder: do not bring it back
+      else retired.set(c.id, c)
     } else if (c.phase === 'working' && stale > 0 && now - c.lastEventAt >= stale) {
       // No event for hours: its end was never reported. Drop it instead of showing it as working forever.
       zoo.splice(i, 1)
       lost++
       if (c.ext) extRetired.add(c.ext.key)
+      else retired.set(c.id, c)
     }
   }
   if (!zoo.length) { closedByPerson = false; stopTicker() }
@@ -428,6 +455,7 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const r = await next(e)
     if (r.deny === undefined && r.agentId) {
+      if (wake($, r.agentId)) return r
       // A new party starts when nobody is working any more (sleeping critters do not count): a person who closed
       // the pane during the last party gets it back for the next one.
       if (!zoo.some(c => c.phase === 'working')) closedByPerson = false
@@ -458,7 +486,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const id = (e as { agentId?: string }).agentId
     if (id) {
-      const c = zoo.find(x => x.id === id)
+      const c = wake($, id) // a tool call from a sleeping or vanished critter means it resumed
       if (c) {
         c.tools++
         c.last = labelOf(e as unknown as Record<string, unknown>)

@@ -5,7 +5,7 @@ const session: SessionStartInput = { surface: null, isInteractive: false, cwd: '
 const run = (args: string): CommandRunInput => ({ command: 'zoo', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
 const done = (agentId: string): TurnCompleteInput => ({ answer: 'done', durationMs: 5, isAborted: false, turnId: 't-' + agentId, reason: 'answer', agentId, usage: { input_tokens: 1200, output_tokens: 300, cache_read_input_tokens: 15000, cache_creation_input_tokens: 0, model: 'claude-haiku-5-5' } })
 
-function world(on: On, o: { placed?: boolean } = {}) {
+function world(on: On, o: { placed?: boolean; fixedId?: string } = {}) {
   mock.store(on, {})
   const opened: string[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -16,12 +16,12 @@ function world(on: On, o: { placed?: boolean } = {}) {
   on('command.run', () => ({ text: '' }))
   on('ui.close', ($, e) => { up.delete(e.id); return { value: undefined } })
   on('ui.invalidate', () => ({ value: undefined }))
-  mock.clock(on)
+  const clock = mock.clock(on)
   let n = 0
-  on('agent.spawn', ($, e) => ({ model: 'haiku', agentId: `a${++n}` }))
+  on('agent.spawn', ($, e) => ({ model: 'haiku', agentId: o.fixedId ?? `a${++n}` }))
   on('tool.call', ($, e) => ({ result: 'ok', text: 'ok' }))
   on('turn.complete', ($, e) => ({ text: e.reason === 'answer' ? e.answer : '' }))
-  return { opened }
+  return { opened, clock }
 }
 
 const spawn = ($: any, type: string, description: string) =>
@@ -128,4 +128,41 @@ test('a person who closed the pane gets it back at the next party: a birth while
   await $.turn.complete(done(b.agentId!))
   await spawn($, 'Explore', 'three') // nobody works any more: a new party, the pane comes back
   expect(w.opened.filter(id => id === 'agent-zoo').length).toBe(2)
+})
+
+test('a resumed subagent is the same critter: a second spawn with its id and tool calls after sleep wake it, born stays 1', async ($, on) => {
+  world(on, { fixedId: 'a1' })
+  await $.session.start(session)
+  const s = await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'do it', description: 'long job', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' } })
+  await $.turn.complete(done(s.agentId!))
+  let r = await $.command.run(run('text'))
+  expect(r.text).toContain('0 working · 1 sleeping · 1 born so far')
+  // the engine reports the resume as another spawn under the same id
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'do it', description: 'long job', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' } })
+  r = await $.command.run(run('text'))
+  expect(r.text).toContain('1 working · 0 sleeping · 1 born so far')
+  expect(r.text).not.toContain('sleeping 💤')
+  // ...or only as tool calls after its turn.complete
+  await $.turn.complete(done(s.agentId!))
+  await $.tool.call({ tool: 'Read', file_path: '/w/src/app.ts', agentId: s.agentId })
+  r = await $.command.run(run('text'))
+  expect(r.text).toContain('long job [general-purpose] — working')
+  expect(r.text).toContain('1 tools, last: Read app.ts')
+  expect(r.text).toContain('1 working · 0 sleeping · 1 born so far')
+})
+
+test('a critter that already went poof comes back as itself when its subagent resumes', { options: { sleepSeconds: 0.1 } }, async ($, on) => {
+  const w = world(on)
+  await $.session.start(session)
+  const s = await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'do it', description: 'long job', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' } })
+  await $.turn.complete(done(s.agentId!))
+  await new Promise(res => setTimeout(res, 1800)) // past sleepSeconds and the poof animation
+  await w.clock.advance(350) // sleeping -> vanishing
+  await w.clock.advance(350) // vanishing -> gone
+  let r = await $.command.run(run('text'))
+  expect(r.text).toContain('nobody here')
+  await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: s.agentId })
+  r = await $.command.run(run('text'))
+  expect(r.text).toContain('long job [Explore] — working')
+  expect(r.text).toContain('1 working · 0 sleeping · 1 born so far')
 })
