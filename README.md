@@ -58,6 +58,12 @@ zoo-run --name surface-ai --kind agy --model gemini-4-argon-high --task "Wire th
 
 `--log` is the file the run writes to, so the card's last line follows the newest line of agy's output. `--count` is optional (the number of log lines matching the regex becomes the tool count). Set `ZOO_DIR` to publish somewhere other than the default folder, and the same path as the `externalDir` option.
 
+### OpenCode
+
+[`opencode/agent-zoo.js`](opencode/agent-zoo.js) is an [OpenCode](https://opencode.ai) plugin that publishes OpenCode sessions without a wrapper, in the TUI and in `opencode run`. Copy it into an OpenCode plugin folder (`~/.config/opencode/plugins/`, or `<project>/.opencode/plugins/`); it is picked up on the next start.
+
+Each prompt starts a run: the card is titled with the session title (until OpenCode names the session, `opencode · <folder>`), shows the model, counts the tool calls and follows the last tool call or the newest line of the reply. The run is `done` when the session goes idle and `failed` on a session error or when OpenCode exits mid-turn. The next prompt in the same session is a new critter. The record id is `opencode-<session id>`.
+
 ### The record (write it from anything)
 
 `<claude dir>/agent-zoo/external/<id>.json`, replaced atomically (write a temp file, rename it):
